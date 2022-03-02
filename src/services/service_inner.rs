@@ -1,14 +1,14 @@
-use std::ops::Deref;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
+use crate::get_len;
 use ahash::AHashSet;
+use anyhow::{bail, Result};
 use aqueue::Actor;
 use bi_directional_pipe::sync::Left;
+use bytes::BufMut;
+use std::ops::Deref;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
 use tcpclient::{SocketClientTrait, TcpClient};
 use tokio::net::TcpStream;
-use anyhow::{bail, Result};
-use bytes::BufMut;
-use crate::get_len;
 
 /// 内部服务器 Inner
 pub struct ServiceInner {
@@ -33,7 +33,6 @@ pub struct ServiceInner {
     pub disconnect_tx: Option<Left<(), ()>>,
 }
 
-
 impl ServiceInner {
     /// 强制断线
     #[inline]
@@ -50,7 +49,7 @@ impl ServiceInner {
 
     ///添加type ids
     #[inline]
-    pub(crate) fn init_typeid_table(&mut self,ids:Vec<u32>)->Result<()>{
+    pub(crate) fn init_typeid_table(&mut self, ids: Vec<u32>) -> Result<()> {
         self.type_ids.clear();
         for id in ids {
             self.type_ids.insert(id);
@@ -62,15 +61,15 @@ impl ServiceInner {
 #[async_trait::async_trait]
 pub trait IServiceInner {
     /// 获取服务器id
-    fn get_service_id(&self)->u32;
+    fn get_service_id(&self) -> u32;
     /// 设置 ping_delay_tick
-    fn set_ping_delay_tick(&self,timestamp:i64);
+    fn set_ping_delay_tick(&self, timestamp: i64);
     /// 获取 ping_delay_tick
-    fn get_ping_delay_tick(&self)->i64;
+    fn get_ping_delay_tick(&self) -> i64;
     /// 设置 last_ping_time
-    fn set_last_ping_time(&self,timestamp:i64);
+    fn set_last_ping_time(&self, timestamp: i64);
     /// 获取last_ping_time
-    fn get_last_ping_time(&self)->i64;
+    fn get_last_ping_time(&self) -> i64;
     /// 设置socket 链接
     async fn set_client(&self, client: Arc<Actor<TcpClient<TcpStream>>>) -> Result<()>;
     /// 发送注册包
@@ -90,35 +89,33 @@ pub trait IServiceInner {
 impl IServiceInner for Actor<ServiceInner> {
     #[inline]
     fn get_service_id(&self) -> u32 {
-        unsafe{
-            self.deref_inner().service_id
-        }
+        unsafe { self.deref_inner().service_id }
     }
 
     #[inline]
     fn set_ping_delay_tick(&self, timestamp: i64) {
-        unsafe{
-            self.deref_inner().ping_delay_tick.store(timestamp,Ordering::Release);
+        unsafe {
+            self.deref_inner()
+                .ping_delay_tick
+                .store(timestamp, Ordering::Release);
         }
     }
 
     #[inline]
     fn get_ping_delay_tick(&self) -> i64 {
-        unsafe{
-            self.deref_inner().ping_delay_tick.load(Ordering::Acquire)
-        }
+        unsafe { self.deref_inner().ping_delay_tick.load(Ordering::Acquire) }
     }
     #[inline]
     fn set_last_ping_time(&self, timestamp: i64) {
-        unsafe{
-            self.deref_inner().last_ping_time.store(timestamp,Ordering::Release);
+        unsafe {
+            self.deref_inner()
+                .last_ping_time
+                .store(timestamp, Ordering::Release);
         }
     }
     #[inline]
     fn get_last_ping_time(&self) -> i64 {
-        unsafe{
-            self.deref_inner().last_ping_time.load(Ordering::Acquire)
-        }
+        unsafe { self.deref_inner().last_ping_time.load(Ordering::Acquire) }
     }
 
     #[inline]
@@ -127,7 +124,7 @@ impl IServiceInner for Actor<ServiceInner> {
             inner.get_mut().client = Some(client);
             Ok(())
         })
-            .await
+        .await
     }
 
     #[inline]
@@ -144,7 +141,6 @@ impl IServiceInner for Actor<ServiceInner> {
             self.send_buff(buffer.into_inner()).await
         }
     }
-
 
     #[inline]
     async fn send_buff<B: Deref<Target = [u8]> + Send + Sync + 'static>(

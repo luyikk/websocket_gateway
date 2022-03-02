@@ -1,17 +1,17 @@
-use anyhow::{ensure, Result};
+use super::service_inner::ServiceInner;
+use crate::services::service_inner::IServiceInner;
+use crate::time::timestamp;
+use anyhow::{bail, ensure, Result};
 use aqueue::Actor;
-use std::sync::atomic::{AtomicBool,Ordering};
-use std::sync::Arc;
-use std::time::Duration;
 use data_rw::DataReader;
 use log::info;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 use tcpclient::TcpClient;
 use tokio::io::{AsyncReadExt, ReadHalf};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use super::service_inner::ServiceInner;
-use crate::services::service_inner::IServiceInner;
-use crate::time::timestamp;
 
 /// 内部服务
 pub struct Service {
@@ -23,8 +23,6 @@ pub struct Service {
     /// 内部服务Actor
     pub inner: Arc<Actor<ServiceInner>>,
 }
-
-
 
 impl Service {
     pub fn new(gateway_id: u32, service_id: u32, ip: &str, port: i32) -> Service {
@@ -134,7 +132,7 @@ impl Service {
         _client: Arc<Actor<TcpClient<TcpStream>>>,
         mut reader: ReadHalf<TcpStream>,
     ) -> Result<bool> {
-        let service_id=inner.get_service_id();
+        let service_id = inner.get_service_id();
         loop {
             let len = {
                 if let Ok(len) = reader.read_u32_le().await {
@@ -147,42 +145,49 @@ impl Service {
 
             let mut buff = vec![0; len];
             let rev = reader.read_exact(&mut buff).await?;
-            ensure!(len == rev, "service:{} read buff error len:{}>rev:{}",service_id, len, rev);
+            ensure!(
+                len == rev,
+                "service:{} read buff error len:{}>rev:{}",
+                service_id,
+                len,
+                rev
+            );
 
             let mut dr = DataReader::from(&buff);
-            let session_id = dr.read_fixed::<u32>()?;
-
-            if session_id==0xFFFFFFFFu32 {
+            if 0xFFFFFFFFu32 == dr.read_fixed::<u32>()? {
                 //到网关的数据
-                let cmd=dr.read_var_str()?;
-                match cmd{
-                    "typeids"=>{
-                        let len=dr.read_fixed::<u32>()?;
-                        let mut ids=Vec::with_capacity(len as usize);
+                let cmd = dr.read_var_str()?;
+                match cmd {
+                    "typeids" => {
+                        let len = dr.read_fixed::<u32>()?;
+                        let mut ids = Vec::with_capacity(len as usize);
                         for _ in 0..len {
                             ids.push(dr.read_fixed::<u32>()?);
                         }
-                        inner.inner_call(|inner|async move{
-                            inner.get_mut().init_typeid_table(ids)
-                        }).await?;
-                        info!("service:{} push type ids count:{}",service_id,len);
-                    },
-                    "ping"=>{
+                        inner
+                            .inner_call(
+                                |inner| async move { inner.get_mut().init_typeid_table(ids) },
+                            )
+                            .await?;
+                        info!("service:{} push type ids count:{}", service_id, len);
+                    }
+                    "ping" => {
                         let now = timestamp();
                         if let Ok(tick) = dr.read_var_integer::<i64>() {
-                            inner.set_ping_delay_tick(now-tick);
-                        }else{
-                            log::warn!("service:{} read ping tick fail",service_id)
+                            inner.set_ping_delay_tick(now - tick);
+                        } else {
+                            log::warn!("service:{} read ping tick fail", service_id)
                         }
                         inner.set_last_ping_time(now);
                     }
-                    _=>{
-
+                    _ => {
+                        bail!("service:{} incompatible cmd:{}", service_id, cmd)
                     }
                 }
+            } else {
+                //发送数据包给客户端
             }
         }
         Ok(true)
     }
 }
-

@@ -1,10 +1,10 @@
 mod services;
 mod time;
 
-use std::time::Duration;
 use anyhow::Result;
-use tokio::time::sleep;
 use log::LevelFilter;
+use std::time::Duration;
+use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,7 +13,7 @@ async fn main() -> Result<()> {
         .filter_module("mio::poll", LevelFilter::Error)
         .init();
 
-    let server= services::service::Service::new(1000,0,"127.0.0.1",18000);
+    let server = services::service::Service::new(1000, 0, "127.0.0.1", 18000);
     server.start();
     server.start();
     sleep(Duration::from_secs(10000)).await;
