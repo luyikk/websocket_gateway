@@ -1,4 +1,5 @@
 use crate::get_len;
+use crate::time::timestamp;
 use ahash::AHashSet;
 use anyhow::{bail, Result};
 use aqueue::Actor;
@@ -30,7 +31,7 @@ pub struct ServiceInner {
     /// 已经open的客户端
     pub open_table: AHashSet<u32>,
     /// disconnect pipe
-    pub disconnect_tx: Option<Left<(), ()>>,
+    pub disconnect_sender: Option<Left<(), ()>>,
 }
 
 impl ServiceInner {
@@ -40,7 +41,7 @@ impl ServiceInner {
         if let Some(ref client) = self.client {
             client.disconnect().await?;
             self.client = None;
-            if let Some(ref tx) = self.disconnect_tx {
+            if let Some(ref tx) = self.disconnect_sender {
                 tx.send(());
             }
         }
@@ -55,6 +56,65 @@ impl ServiceInner {
             self.type_ids.insert(id);
         }
         Ok(())
+    }
+
+    /// 检查ping
+    #[inline]
+    async fn check_ping(&self) -> Result<bool> {
+        let last_ping_time = self.last_ping_time.load(Ordering::Acquire);
+        let now = timestamp();
+        //30秒超时 单位tick 秒后 7个0
+        if last_ping_time > 0 && now - last_ping_time > 30 * 1000 * 10000 {
+            log::warn!(
+                "service:{} ping time out,shutdown it,now:{},last_ping_time:{},ping_delay_tick:{}",
+                self.service_id,
+                now,
+                last_ping_time,
+                self.ping_delay_tick.load(Ordering::Acquire)
+            );
+
+            return Ok(true);
+        } else if let Err(er) = self.send_ping(now).await {
+            log::error!("service{} send ping  error:{:?}", self.service_id, er)
+        }
+
+        Ok(false)
+    }
+
+    /// 发送ping
+    #[inline]
+    async fn send_ping(&self, time: i64) -> Result<()> {
+        let mut buffer = data_rw::Data::new();
+        buffer.write_fixed(0u32);
+        buffer.write_fixed(0xFFFFFFFFu32);
+        buffer.write_var_integer("ping");
+        buffer.write_var_integer(time);
+        let len = get_len!(buffer);
+        (&mut buffer[0..4]).put_u32_le(len);
+        self.send_buff(buffer.into_inner()).await
+    }
+
+    /// 发送数据包
+    #[inline]
+    async fn send_buff<B: Deref<Target = [u8]> + Send + Sync + 'static>(
+        &self,
+        buff: B,
+    ) -> Result<()> {
+        if let Some(ref client) = self.client {
+            client.send_all(buff).await
+        } else {
+            bail!("service:{} not connect", self.service_id)
+        }
+    }
+
+    /// 发送数据包 ref
+    #[inline]
+    async fn send_all_ref<'a>(&'a self, buff: &'a [u8]) -> Result<()> {
+        if let Some(ref client) = self.client {
+            client.send_all_ref(buff).await
+        } else {
+            bail!("service:{} not connect", self.service_id)
+        }
     }
 }
 
@@ -72,6 +132,8 @@ pub trait IServiceInner {
     fn get_last_ping_time(&self) -> i64;
     /// 设置socket 链接
     async fn set_client(&self, client: Arc<Actor<TcpClient<TcpStream>>>) -> Result<()>;
+    /// 检查ping超时
+    async fn check_ping(&self) -> Result<bool>;
     /// 发送注册包
     async fn send_register(&self) -> Result<()>;
     /// 发送数据包
@@ -128,6 +190,11 @@ impl IServiceInner for Actor<ServiceInner> {
     }
 
     #[inline]
+    async fn check_ping(&self) -> Result<bool> {
+        unsafe { self.deref_inner().check_ping().await }
+    }
+
+    #[inline]
     async fn send_register(&self) -> Result<()> {
         unsafe {
             let mut buffer = data_rw::Data::new();
@@ -138,7 +205,7 @@ impl IServiceInner for Actor<ServiceInner> {
             buffer.write_fixed(1u8);
             let len = get_len!(buffer);
             (&mut buffer[0..4]).put_u32_le(len);
-            self.send_buff(buffer.into_inner()).await
+            self.deref_inner().send_buff(buffer.into_inner()).await
         }
     }
 
@@ -147,24 +214,12 @@ impl IServiceInner for Actor<ServiceInner> {
         &self,
         buff: B,
     ) -> Result<()> {
-        unsafe {
-            if let Some(ref client) = self.deref_inner().client {
-                client.send_all(buff).await
-            } else {
-                bail!("service:{} not connect", self.deref_inner().service_id)
-            }
-        }
+        unsafe { self.deref_inner().send_buff(buff).await }
     }
 
     #[inline]
     async fn send_all_ref<'a>(&'a self, buff: &'a [u8]) -> Result<()> {
-        unsafe {
-            if let Some(ref client) = self.deref_inner().client {
-                client.send_all_ref(buff).await
-            } else {
-                bail!("service:{} not connect", self.deref_inner().service_id)
-            }
-        }
+        unsafe { self.deref_inner().send_all_ref(buff).await }
     }
 
     #[inline]

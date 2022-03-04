@@ -1,6 +1,11 @@
+mod config;
 mod services;
+mod static_def;
 mod time;
+mod timer;
 
+use crate::services::IServiceManager;
+use crate::static_def::{CONFIG, SERVICE_MANAGER, TIMER_MANAGER};
 use anyhow::Result;
 use log::LevelFilter;
 use std::time::Duration;
@@ -13,9 +18,8 @@ async fn main() -> Result<()> {
         .filter_module("mio::poll", LevelFilter::Error)
         .init();
 
-    let server = services::service::Service::new(1000, 0, "127.0.0.1", 18000);
-    server.start();
-    server.start();
+    SERVICE_MANAGER.start();
+    TIMER_MANAGER.start();
     sleep(Duration::from_secs(10000)).await;
     Ok(())
 }

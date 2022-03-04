@@ -39,7 +39,7 @@ impl Service {
                 ping_delay_tick: Default::default(),
                 wait_open_table: Default::default(),
                 open_table: Default::default(),
-                disconnect_tx: None,
+                disconnect_sender: None,
             })),
         }
     }
@@ -56,17 +56,35 @@ impl Service {
         }
     }
 
+    /// 检查ping
+    #[inline]
+    pub async fn check_ping(&self) -> Result<bool> {
+        self.inner.check_ping().await
+    }
+
+    /// 强制断线
+    #[inline]
+    pub async fn disconnect_now(&self) -> Result<()> {
+        self.inner.disconnect().await
+    }
+
+    /// 是否断线
+    #[inline]
+    pub fn is_disconnect(&self) -> bool {
+        unsafe { self.inner.deref_inner().client.is_none() }
+    }
+
     /// 尝试连接
     fn try_connect(&self) {
         let service_id = self.service_id;
         let address = self.address.clone();
         let inner = self.inner.clone();
         tokio::spawn(async move {
-            let (tx, rx) = bi_directional_pipe::sync::pipe::<(), ()>();
+            let (sender_disconnect, wait_disconnect) = bi_directional_pipe::sync::pipe::<(), ()>();
 
             inner
                 .inner_call(|inner| async move {
-                    inner.get_mut().disconnect_tx = Some(tx);
+                    inner.get_mut().disconnect_sender = Some(sender_disconnect);
                     Ok(())
                 })
                 .await
@@ -119,7 +137,10 @@ impl Service {
                 } else {
                     log::info!("connect to {}-{} ok", service_id, ref_address);
                     //等待断线重连
-                    rx.recv().await.expect("bi_directional_pipe read fail");
+                    wait_disconnect
+                        .recv()
+                        .await
+                        .expect("bi_directional_pipe read fail");
                 }
                 need_wait = true;
             }
@@ -154,7 +175,7 @@ impl Service {
             );
 
             let mut dr = DataReader::from(&buff);
-            if 0xFFFFFFFFu32 == dr.read_fixed::<u32>()? {
+            if u32::MAX == dr.read_fixed::<u32>()? {
                 //到网关的数据
                 let cmd = dr.read_var_str()?;
                 match cmd {
