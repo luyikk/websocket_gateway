@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::services::ServiceManager;
 use crate::timer::{PingCheckTimer, Timer, TimerManager};
+use crate::users::UserManager;
 use aqueue::Actor;
 use std::env::current_dir;
 use std::path::Path;
@@ -54,5 +55,10 @@ lazy_static::lazy_static! {
             Box::new(PingCheckTimer) as Box<dyn Timer>
         ];
         TimerManager::new(ts)
+    };
+
+    ///客户端管理器
+    pub static ref USER_MANAGER:Actor<UserManager>={
+        UserManager::new(CONFIG.client_timeout_seconds)
     };
 }

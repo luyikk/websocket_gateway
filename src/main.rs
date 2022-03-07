@@ -3,13 +3,13 @@ mod services;
 mod static_def;
 mod time;
 mod timer;
+mod users;
 
 use crate::services::IServiceManager;
 use crate::static_def::{CONFIG, SERVICE_MANAGER, TIMER_MANAGER};
+use crate::users::Listen;
 use anyhow::Result;
 use log::LevelFilter;
-use std::time::Duration;
-use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -20,8 +20,8 @@ async fn main() -> Result<()> {
 
     SERVICE_MANAGER.start();
     TIMER_MANAGER.start();
-    sleep(Duration::from_secs(10000)).await;
-    Ok(())
+    let server = Listen::new(format!("0.0.0.0:{}", CONFIG.listen_port)).await?;
+    server.start().await
 }
 
 #[macro_export]

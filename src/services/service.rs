@@ -1,9 +1,11 @@
 use super::service_inner::ServiceInner;
 use crate::services::service_inner::IServiceInner;
+use crate::static_def::USER_MANAGER;
 use crate::time::timestamp;
+use crate::users::IUserManager;
 use anyhow::{bail, ensure, Result};
 use aqueue::Actor;
-use data_rw::DataReader;
+use data_rw::DataOwnedReader;
 use log::info;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -174,8 +176,9 @@ impl Service {
                 rev
             );
 
-            let mut dr = DataReader::from(&buff);
-            if u32::MAX == dr.read_fixed::<u32>()? {
+            let mut dr = DataOwnedReader::new(buff);
+            let session_id= dr.read_fixed::<u32>()?;
+            if u32::MAX == session_id {
                 //到网关的数据
                 let cmd = dr.read_var_str()?;
                 match cmd {
@@ -201,12 +204,56 @@ impl Service {
                         }
                         inner.set_last_ping_time(now);
                     }
+                    "open" => {
+                        let session_id = dr.read_var_integer::<u32>()?;
+                        ensure!(
+                            session_id > 0,
+                            "service:{} read session id error",
+                            service_id
+                        );
+                        if inner.open_ok(session_id).await? {
+                            USER_MANAGER.open_service(service_id, session_id).await?;
+                        } else {
+                            log::error!("client session id:{} open fail", session_id);
+                        }
+                    }
+                    "close" => {
+                        let session_id = dr.read_var_integer::<u32>()?;
+                        ensure!(
+                            session_id > 0,
+                            "service:{} read session id error",
+                            service_id
+                        );
+                        if inner.close(session_id).await? {
+                            USER_MANAGER.close_service(service_id, session_id).await?;
+                        }
+                    }
+                    "kick" => {
+                        let session_id = dr.read_var_integer::<u32>()?;
+                        ensure!(
+                            session_id > 0,
+                            "service:{} read session id error",
+                            service_id
+                        );
+                        let delay_ms = dr.read_var_integer::<i32>()?;
+                        ensure!(
+                            delay_ms > 0,
+                            "service:{} read kick time error:{}",
+                            service_id,
+                            delay_ms
+                        );
+
+                        USER_MANAGER
+                            .kick_client(service_id, session_id, delay_ms)
+                            .await?;
+                    }
                     _ => {
                         bail!("service:{} incompatible cmd:{}", service_id, cmd)
                     }
                 }
             } else {
                 //发送数据包给客户端
+                USER_MANAGER.send_buffer(service_id,session_id,dr.get_offset(),dr.into_inner()).await?;
             }
         }
         Ok(true)

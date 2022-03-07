@@ -58,6 +58,40 @@ impl ServiceInner {
         Ok(())
     }
 
+    /// OPEN 客户端
+    #[inline]
+    async fn open(&mut self, session_id: u32, ipaddress: &str) -> Result<()> {
+        if self.wait_open_table.insert(session_id) {
+            if let Err(er) = self.send_open(session_id, ipaddress).await {
+                self.wait_open_table.remove(&session_id);
+                Err(er)
+            } else {
+                Ok(())
+            }
+        } else {
+            bail!("repeat open:{}", session_id)
+        }
+    }
+
+    /// 是否和此服务OPEN
+    #[inline]
+    fn have_session_id(&self, session_id: u32) -> bool {
+        self.open_table.contains(&session_id)
+    }
+
+    /// 通知客户端断线
+    #[inline]
+    async fn drop_client(&mut self, session_id: u32) -> Result<()> {
+        self.wait_open_table.remove(&session_id);
+        self.open_table.remove(&session_id);
+        log::info!(
+            "disconnect peer:{} to service:{}",
+            session_id,
+            self.service_id
+        );
+        self.send_disconnect(session_id).await
+    }
+
     /// 检查ping
     #[inline]
     async fn check_ping(&self) -> Result<bool> {
@@ -79,6 +113,72 @@ impl ServiceInner {
         }
 
         Ok(false)
+    }
+
+    /// 服务器 OPEN 处理
+    #[inline]
+    fn open_ok(&mut self, session_id: u32) -> Result<bool> {
+        if self.service_id == 0 {
+            //如果是0号服务器需要到表里面查询一番 查不到打警告返回
+            if !self.wait_open_table.remove(&session_id) {
+                log::warn!("service:{} not found SessionId:{} open is fail,Maybe the client is disconnected.", self.service_id, session_id);
+                return Ok(false);
+            }
+        }
+
+        if self.open_table.insert(session_id) {
+            Ok(true)
+        } else {
+            log::warn!(
+                "service: {} insert SessionId:{} open is fail",
+                self.service_id,
+                session_id
+            );
+            Ok(false)
+        }
+    }
+
+    /// 服务器close 客户端
+    #[inline]
+    fn close(&mut self, session_id: u32) -> Result<bool> {
+        // 如果TRUE 说明还没OPEN 就被CLOSE了
+        if !self.wait_open_table.remove(&session_id) && !self.open_table.remove(&session_id) {
+            //如果OPEN表里面找不到那么打警告返回
+            log::warn!(
+                "service:{} not found SessionId:{} close is fail",
+                self.service_id,
+                session_id
+            );
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    /// 发送open
+    #[inline]
+    async fn send_open(&self, session_id: u32, ipaddress: &str) -> Result<()> {
+        let mut buffer = data_rw::Data::new();
+        buffer.write_fixed(0u32);
+        buffer.write_fixed(0xFFFFFFFFu32);
+        buffer.write_var_integer("accept");
+        buffer.write_var_integer(session_id);
+        buffer.write_var_integer(ipaddress);
+        let len = get_len!(buffer);
+        (&mut buffer[0..4]).put_u32_le(len);
+        self.send_buff(buffer.into_inner()).await
+    }
+
+    /// 发送客户端断线
+    #[inline]
+    async fn send_disconnect(&self, session_id: u32) -> Result<()> {
+        let mut buffer = data_rw::Data::new();
+        buffer.write_fixed(0u32);
+        buffer.write_fixed(0xFFFFFFFFu32);
+        buffer.write_var_integer("disconnect");
+        buffer.write_var_integer(session_id);
+        let len = get_len!(buffer);
+        (&mut buffer[0..4]).put_u32_le(len);
+        self.send_buff(buffer.into_inner()).await
     }
 
     /// 发送ping
@@ -132,8 +232,18 @@ pub trait IServiceInner {
     fn get_last_ping_time(&self) -> i64;
     /// 设置socket 链接
     async fn set_client(&self, client: Arc<Actor<TcpClient<TcpStream>>>) -> Result<()>;
+    /// OPEN 客户端
+    async fn open(&self, session_id: u32, ipaddress: &str) -> Result<()>;
+    /// 通知客户端断线
+    async fn drop_client(&self, session_id: u32) -> Result<()>;
+    /// 是否和此服务OPEN
+    fn have_session_id(&self, session_id: u32) -> bool;
     /// 检查ping超时
     async fn check_ping(&self) -> Result<bool>;
+    /// 服务器 OPEN 处理
+    async fn open_ok(&self, session_id: u32) -> Result<bool>;
+    /// 服务器close 客户端
+    async fn close(&self, session_id: u32) -> Result<bool>;
     /// 发送注册包
     async fn send_register(&self) -> Result<()>;
     /// 发送数据包
@@ -190,8 +300,41 @@ impl IServiceInner for Actor<ServiceInner> {
     }
 
     #[inline]
+    async fn open(&self, session_id: u32, ipaddress: &str) -> Result<()> {
+        unsafe {
+            self.inner_call_ref(
+                |inner| async move { inner.get_mut().open(session_id, ipaddress).await },
+            )
+            .await
+        }
+    }
+
+    #[inline]
+    async fn drop_client(&self, session_id: u32) -> Result<()> {
+        self.inner_call(|inner| async move { inner.get_mut().drop_client(session_id).await })
+            .await
+    }
+
+    #[inline]
+    fn have_session_id(&self, session_id: u32) -> bool {
+        unsafe { self.deref_inner().have_session_id(session_id) }
+    }
+
+    #[inline]
     async fn check_ping(&self) -> Result<bool> {
         unsafe { self.deref_inner().check_ping().await }
+    }
+
+    #[inline]
+    async fn open_ok(&self, session_id: u32) -> Result<bool> {
+        self.inner_call(|inner| async move { inner.get_mut().open_ok(session_id) })
+            .await
+    }
+
+    #[inline]
+    async fn close(&self, session_id: u32) -> Result<bool> {
+        self.inner_call(|inner| async move { inner.get_mut().close(session_id) })
+            .await
     }
 
     #[inline]
