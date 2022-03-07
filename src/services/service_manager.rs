@@ -4,6 +4,7 @@ use crate::CONFIG;
 use ahash::AHashMap;
 use anyhow::{Context, Result};
 use aqueue::Actor;
+use data_rw::DataOwnedReader;
 
 /// 服务器管理器
 pub struct ServiceManager {
@@ -77,6 +78,47 @@ impl ServiceManager {
 
         Ok(())
     }
+
+    /// 根据typeid 返回服务器
+    #[inline]
+    fn get_service_by_typeid(&self, session_id: u32, type_id: u32) -> Option<&Service> {
+        self.services
+            .values()
+            .find(|&service| service.inner.check_type_id(session_id, type_id))
+    }
+
+    /// 发送数据给服务器
+    #[inline]
+    async fn send_buffer(
+        &self,
+        session_id: u32,
+        service_id: u32,
+        mut reader: DataOwnedReader,
+    ) -> Result<()> {
+        if service_id == 0xEEEEEEEE {
+            //智能路由
+            let serial = reader.read_var_integer::<i32>()?;
+            let type_id = reader.read_var_integer::<u32>()?;
+            if let Some(service) = self.get_service_by_typeid(session_id, type_id) {
+                service
+                    .inner
+                    .send_buffer_by_typeid(
+                        session_id,
+                        serial,
+                        type_id,
+                        &reader[reader.get_offset()..],
+                    )
+                    .await?;
+            } else {
+                log::error! {"send_buffer 0xEEEEEEEE not found service service_id:{} session_id:{} typeid:{}",service_id, session_id,type_id}
+            }
+        } else {
+            if let Some(service)=self.services.get(&service_id){
+                service.inner.send_buffer(session_id,&reader[reader.get_offset()..]).await?;
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -89,6 +131,13 @@ pub trait IServiceManager {
     async fn open_service(&self, session_id: u32, service_id: u32, ipaddress: &str) -> Result<()>;
     /// 客户端断线事件
     async fn disconnect_events(&self, session_id: u32) -> Result<()>;
+    /// 发送数据给服务器
+    async fn send_buffer(
+        &self,
+        session_id: u32,
+        service_id: u32,
+        reader: DataOwnedReader,
+    ) -> Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -124,5 +173,19 @@ impl IServiceManager for Actor<ServiceManager> {
     #[inline]
     async fn disconnect_events(&self, session_id: u32) -> Result<()> {
         unsafe { self.deref_inner().disconnect_events(session_id).await }
+    }
+
+    #[inline]
+    async fn send_buffer(
+        &self,
+        session_id: u32,
+        service_id: u32,
+        reader: DataOwnedReader,
+    ) -> Result<()> {
+        unsafe {
+            self.deref_inner()
+                .send_buffer(session_id, service_id, reader)
+                .await
+        }
     }
 }

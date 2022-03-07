@@ -10,7 +10,7 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::time::timeout;
 
 use crate::static_def::USER_MANAGER;
-use crate::users::{Client, IUserManager};
+use crate::users::{input_buff, Client, IUserManager};
 use crate::{IServiceManager, CONFIG, SERVICE_MANAGER};
 
 /// 最大数据表长度限制 512K
@@ -57,7 +57,8 @@ impl Listen {
         SERVICE_MANAGER
             .open_service(client.session_id, 0, &client.address)
             .await?;
-
+        let address = &client.address;
+        let session_id = client.session_id;
         loop {
             let len = {
                 let res = timeout(
@@ -67,8 +68,9 @@ impl Listen {
                 .await
                 .map_err(|_| {
                     anyhow!(
-                        "client:{} {} secs not read data",
-                        client,
+                        "client:{}-{} {} secs not read data",
+                        session_id,
+                        address,
                         CONFIG.client_timeout_seconds as u64
                     )
                 })?;
@@ -102,6 +104,8 @@ impl Listen {
                         len,
                         rev
                     );
+
+                    input_buff(&client, data).await?;
                 }
                 Err(err) => {
                     log::error!("peer:{} read data error:{:?}", client, err);

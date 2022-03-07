@@ -1,9 +1,12 @@
+use crate::time::timestamp;
 use crate::{get_len, IServiceManager, SERVICE_MANAGER};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, ensure, Result};
 use bytes::BufMut;
+use data_rw::DataOwnedReader;
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tcpserver::IPeer;
 use tokio::time::sleep;
@@ -103,11 +106,7 @@ impl Client {
 
     /// 发送数据包给客户端
     #[inline]
-    pub async fn send(
-        &self,
-        session_id: u32,
-        buff: &[u8],
-    ) -> Result<()> {
+    pub async fn send(&self, session_id: u32, buff: &[u8]) -> Result<()> {
         let mut buffer = data_rw::Data::new();
         buffer.write_fixed(0u32);
         buffer.write_fixed(session_id);
@@ -153,5 +152,29 @@ impl Client {
             .send_all(buff)
             .await
             .map_err(|x| anyhow!("client:{} send data error:{}", self, x))
+    }
+}
+
+/// 客户端数据包处理
+#[inline]
+pub async fn input_buff(client: &Arc<Client>, data: Vec<u8>) -> Result<()> {
+    ensure!(
+        data.len() > 4,
+        "peer:{} data len:{} <4",
+        client.session_id,
+        data.len()
+    );
+    let mut reader = DataOwnedReader::new(data);
+    let server_id = reader.read_fixed::<u32>()?;
+    client.last_recv_time.store(timestamp(), Ordering::Release);
+    if u32::MAX == server_id {
+        //给网关发送数据包,默认当PING包无脑回
+        client.send(server_id, &reader[reader.get_offset()..]).await
+    } else if !client.is_open_zero.load(Ordering::Acquire) {
+        client.kick().await?;
+        log::info!("client:{} not open 0 read data Disconnect it", client);
+        Ok(())
+    } else {
+        SERVICE_MANAGER.send_buffer(client.session_id,server_id,reader).await
     }
 }

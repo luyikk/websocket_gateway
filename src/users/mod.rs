@@ -94,7 +94,7 @@ impl UserManager {
         &self,
         service_id: u32,
         session_id: u32,
-        offset:usize,
+        offset: usize,
         buff: Vec<u8>,
     ) -> Result<()> {
         if let Some(client) = self.users.get(&session_id) {
@@ -133,7 +133,7 @@ pub trait IUserManager {
         &self,
         service_id: u32,
         session_id: u32,
-        offset:usize,
+        offset: usize,
         buff: Vec<u8>,
     ) -> Result<()>;
 }
@@ -186,12 +186,12 @@ impl IUserManager for Actor<UserManager> {
         &self,
         service_id: u32,
         session_id: u32,
-        offset:usize,
+        offset: usize,
         buff: Vec<u8>,
     ) -> Result<()> {
         unsafe {
             self.deref_inner()
-                .send_buffer(service_id, session_id, offset,buff)
+                .send_buffer(service_id, session_id, offset, buff)
                 .await
         }
     }

@@ -177,7 +177,7 @@ impl Service {
             );
 
             let mut dr = DataOwnedReader::new(buff);
-            let session_id= dr.read_fixed::<u32>()?;
+            let session_id = dr.read_fixed::<u32>()?;
             if u32::MAX == session_id {
                 //到网关的数据
                 let cmd = dr.read_var_str()?;
@@ -253,7 +253,9 @@ impl Service {
                 }
             } else {
                 //发送数据包给客户端
-                USER_MANAGER.send_buffer(service_id,session_id,dr.get_offset(),dr.into_inner()).await?;
+                USER_MANAGER
+                    .send_buffer(service_id, session_id, dr.get_offset(), dr.into_inner())
+                    .await?;
             }
         }
         Ok(true)

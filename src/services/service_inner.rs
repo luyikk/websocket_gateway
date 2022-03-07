@@ -154,6 +154,32 @@ impl ServiceInner {
         Ok(true)
     }
 
+    /// 检测此session_id 和 typeid 是否是此服务器
+    #[inline]
+    fn check_type_id(&self, session_id: u32, type_id: u32) -> bool {
+        self.open_table.contains(&session_id) && self.type_ids.contains(&type_id)
+    }
+
+    /// 发送BUFF 智能路由用
+    #[inline]
+    async fn send_buffer_by_typeid(
+        &self,
+        session_id: u32,
+        serial: i32,
+        typeid: u32,
+        data: &[u8],
+    ) -> Result<()> {
+        let mut buffer = data_rw::Data::new();
+        buffer.write_fixed(0u32);
+        buffer.write_fixed(session_id);
+        buffer.write_var_integer(serial);
+        buffer.write_var_integer(typeid);
+        buffer.write_buf(data);
+        let len = get_len!(buffer);
+        (&mut buffer[0..4]).put_u32_le(len);
+        self.send_buff(buffer.into_inner()).await
+    }
+
     /// 发送open
     #[inline]
     async fn send_open(&self, session_id: u32, ipaddress: &str) -> Result<()> {
@@ -244,15 +270,22 @@ pub trait IServiceInner {
     async fn open_ok(&self, session_id: u32) -> Result<bool>;
     /// 服务器close 客户端
     async fn close(&self, session_id: u32) -> Result<bool>;
+    /// 检测此session_id 和 typeid 是否是此服务器
+    fn check_type_id(&self, session_id: u32, type_id: u32) -> bool;
+    /// 发送BUFF 智能路由用
+    async fn send_buffer_by_typeid(
+        &self,
+        session_id: u32,
+        serial: i32,
+        typeid: u32,
+        data: &[u8],
+    ) -> Result<()>;
     /// 发送注册包
     async fn send_register(&self) -> Result<()>;
-    /// 发送数据包
-    async fn send_buff<B: Deref<Target = [u8]> + Send + Sync + 'static>(
-        &self,
-        buff: B,
-    ) -> Result<()>;
-    /// 发送数据包切片
-    async fn send_all_ref<'a>(&'a self, buff: &'a [u8]) -> Result<()>;
+
+    /// 发送BUFF
+    async fn send_buffer(&self,session_id:u32,buff:&[u8])->Result<()>;
+
     /// 断线
     async fn disconnect(&self) -> Result<()>;
 }
@@ -338,6 +371,26 @@ impl IServiceInner for Actor<ServiceInner> {
     }
 
     #[inline]
+    fn check_type_id(&self, session_id: u32, type_id: u32) -> bool {
+        unsafe { self.deref_inner().check_type_id(session_id, type_id) }
+    }
+
+    #[inline]
+    async fn send_buffer_by_typeid(
+        &self,
+        session_id: u32,
+        serial: i32,
+        typeid: u32,
+        data: &[u8],
+    ) -> Result<()> {
+        unsafe {
+            self.deref_inner()
+                .send_buffer_by_typeid(session_id, serial, typeid, data)
+                .await
+        }
+    }
+
+    #[inline]
     async fn send_register(&self) -> Result<()> {
         unsafe {
             let mut buffer = data_rw::Data::new();
@@ -353,16 +406,16 @@ impl IServiceInner for Actor<ServiceInner> {
     }
 
     #[inline]
-    async fn send_buff<B: Deref<Target = [u8]> + Send + Sync + 'static>(
-        &self,
-        buff: B,
-    ) -> Result<()> {
-        unsafe { self.deref_inner().send_buff(buff).await }
-    }
-
-    #[inline]
-    async fn send_all_ref<'a>(&'a self, buff: &'a [u8]) -> Result<()> {
-        unsafe { self.deref_inner().send_all_ref(buff).await }
+    async fn send_buffer(&self, session_id: u32, buff: &[u8]) -> Result<()> {
+        unsafe {
+            let mut buffer = data_rw::Data::new();
+            buffer.write_fixed(0u32);
+            buffer.write_fixed(session_id);
+            buffer.write_buf(buff);
+            let len = get_len!(buffer);
+            (&mut buffer[0..4]).put_u32_le(len);
+            self.deref_inner().send_buff(buffer.into_inner()).await
+        }
     }
 
     #[inline]
