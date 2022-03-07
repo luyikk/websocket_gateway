@@ -1,17 +1,15 @@
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{ensure, Result};
 use aqueue::Actor;
 use log::info;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 use tcpserver::*;
 use tokio::io::{AsyncReadExt, ReadHalf};
 use tokio::net::{TcpStream, ToSocketAddrs};
-use tokio::time::timeout;
 
 use crate::static_def::USER_MANAGER;
 use crate::users::{input_buff, Client, IUserManager};
-use crate::{IServiceManager, CONFIG, SERVICE_MANAGER};
+use crate::{IServiceManager,SERVICE_MANAGER};
 
 /// 最大数据表长度限制 512K
 const MAX_BUFF_LEN: usize = 512 * 1024;
@@ -57,25 +55,31 @@ impl Listen {
         SERVICE_MANAGER
             .open_service(client.session_id, 0, &client.address)
             .await?;
-        let address = &client.address;
-        let session_id = client.session_id;
+
         loop {
             let len = {
-                let res = timeout(
-                    Duration::from_secs(CONFIG.client_timeout_seconds as u64),
-                    reader.read_u32_le(),
-                )
-                .await
-                .map_err(|_| {
-                    anyhow!(
-                        "client:{}-{} {} secs not read data",
-                        session_id,
-                        address,
-                        CONFIG.client_timeout_seconds as u64
-                    )
-                })?;
+                // let res = timeout(
+                //     Duration::from_secs(CONFIG.client_timeout_seconds as u64),
+                //     reader.read_u32_le(),
+                // )
+                // .await
+                // .map_err(|_| {
+                //     anyhow!(
+                //         "client:{}-{} {} secs not read data",
+                //         session_id,
+                //         address,
+                //         CONFIG.client_timeout_seconds as u64
+                //     )
+                // })?;
 
-                if let Ok(len) = res {
+                // if let Ok(len) = res {
+                //     len as usize
+                // } else {
+                //     log::warn!("client:{} disconnect not read data", client);
+                //     break;
+                // }
+
+                if let Ok(len) = reader.read_u32_le().await {
                     len as usize
                 } else {
                     log::warn!("client:{} disconnect not read data", client);
