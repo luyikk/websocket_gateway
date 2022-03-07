@@ -175,6 +175,8 @@ pub async fn input_buff(client: &Arc<Client>, data: Vec<u8>) -> Result<()> {
         log::info!("client:{} not open 0 read data Disconnect it", client);
         Ok(())
     } else {
-        SERVICE_MANAGER.send_buffer(client.session_id,server_id,reader).await
+        SERVICE_MANAGER
+            .send_buffer(client.session_id, server_id, reader)
+            .await
     }
 }

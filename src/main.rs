@@ -23,10 +23,3 @@ async fn main() -> Result<()> {
     let server = Listen::new(format!("0.0.0.0:{}", CONFIG.listen_port)).await?;
     server.start().await
 }
-
-#[macro_export]
-macro_rules! get_len {
-    ($buff:expr) => {
-        ($buff.len() - 4) as u32
-    };
-}

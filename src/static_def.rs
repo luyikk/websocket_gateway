@@ -62,3 +62,10 @@ lazy_static::lazy_static! {
         UserManager::new(CONFIG.client_timeout_seconds)
     };
 }
+
+#[macro_export]
+macro_rules! get_len {
+    ($buff:expr) => {
+        ($buff.len() - 4) as u32
+    };
+}

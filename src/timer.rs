@@ -1,4 +1,5 @@
 mod check_ping;
+mod check_timeout;
 
 use anyhow::Result;
 use log::*;
@@ -7,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::time::{sleep, Duration};
 
 pub use check_ping::PingCheckTimer;
+pub use check_timeout::CheckTimeOut;
 
 /// 定时器
 #[async_trait::async_trait]

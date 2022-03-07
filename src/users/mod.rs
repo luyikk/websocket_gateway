@@ -4,10 +4,10 @@ mod listen;
 use ahash::AHashMap;
 use anyhow::{ensure, Result};
 use aqueue::Actor;
-use std::ops::Deref;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use crate::time::timestamp;
 pub use client::*;
 pub use listen::*;
 
@@ -112,6 +112,35 @@ impl UserManager {
         }
         Ok(())
     }
+
+    /// 检查长时间不发包的客户端 给他T了
+    #[inline]
+    async fn check_timeout(&mut self) -> Result<()> {
+        let current_timestamp = timestamp();
+        for session_id in self
+            .users
+            .values()
+            .filter_map(|client| {
+                if current_timestamp - client.last_recv_time.load(Ordering::Acquire)
+                    > self.client_timeout_tick
+                {
+                    Some(client.session_id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+        {
+            if let Some(client) = self.users.remove(&session_id) {
+                log::info!("client:{} timeout need disconnect", client);
+                if let Err(err) = client.disconnect_now().await {
+                    log::error!("RemovePeer:{} is error:{:?}", client, err)
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -136,6 +165,8 @@ pub trait IUserManager {
         offset: usize,
         buff: Vec<u8>,
     ) -> Result<()>;
+    /// 检查长时间不发包的客户端 给他T了
+    async fn check_timeout(&self) -> Result<()>;
 }
 
 #[async_trait::async_trait]
@@ -194,5 +225,11 @@ impl IUserManager for Actor<UserManager> {
                 .send_buffer(service_id, session_id, offset, buff)
                 .await
         }
+    }
+
+    #[inline]
+    async fn check_timeout(&self) -> Result<()> {
+        self.inner_call(|inner| async move { inner.get_mut().check_timeout().await })
+            .await
     }
 }

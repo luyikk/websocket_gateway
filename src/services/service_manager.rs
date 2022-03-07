@@ -8,7 +8,6 @@ use data_rw::DataOwnedReader;
 
 /// 服务器管理器
 pub struct ServiceManager {
-    gateway_id: u32,
     services: AHashMap<u32, Service>,
 }
 
@@ -28,10 +27,7 @@ impl ServiceManager {
             );
         }
 
-        Actor::new(ServiceManager {
-            gateway_id: CONFIG.gateway_id,
-            services,
-        })
+        Actor::new(ServiceManager { services })
     }
     /// 启动服务器
     fn start(&self) {
@@ -112,10 +108,11 @@ impl ServiceManager {
             } else {
                 log::error! {"send_buffer 0xEEEEEEEE not found service service_id:{} session_id:{} typeid:{}",service_id, session_id,type_id}
             }
-        } else {
-            if let Some(service)=self.services.get(&service_id){
-                service.inner.send_buffer(session_id,&reader[reader.get_offset()..]).await?;
-            }
+        } else if let Some(service) = self.services.get(&service_id) {
+            service
+                .inner
+                .send_buffer(session_id, &reader[reader.get_offset()..])
+                .await?;
         }
         Ok(())
     }

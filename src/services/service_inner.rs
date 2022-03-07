@@ -233,15 +233,15 @@ impl ServiceInner {
         }
     }
 
-    /// 发送数据包 ref
-    #[inline]
-    async fn send_all_ref<'a>(&'a self, buff: &'a [u8]) -> Result<()> {
-        if let Some(ref client) = self.client {
-            client.send_all_ref(buff).await
-        } else {
-            bail!("service:{} not connect", self.service_id)
-        }
-    }
+    // /// 发送数据包 ref
+    // #[inline]
+    // async fn send_all_ref<'a>(&'a self, buff: &'a [u8]) -> Result<()> {
+    //     if let Some(ref client) = self.client {
+    //         client.send_all_ref(buff).await
+    //     } else {
+    //         bail!("service:{} not connect", self.service_id)
+    //     }
+    // }
 }
 
 #[async_trait::async_trait]
@@ -284,7 +284,7 @@ pub trait IServiceInner {
     async fn send_register(&self) -> Result<()>;
 
     /// 发送BUFF
-    async fn send_buffer(&self,session_id:u32,buff:&[u8])->Result<()>;
+    async fn send_buffer(&self, session_id: u32, buff: &[u8]) -> Result<()>;
 
     /// 断线
     async fn disconnect(&self) -> Result<()>;
