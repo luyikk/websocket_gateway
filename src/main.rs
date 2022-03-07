@@ -95,9 +95,8 @@ fn install_log() -> Result<()> {
     #[cfg(all(feature = "flexi_log", feature = "env_log"))]
     {
         env_logger::Builder::new()
-            .filter_level(LevelFilter::Trace)
-            .filter_module("sqlx::query", LevelFilter::Error)
-            .filter_module("mio::poll", LevelFilter::Error)
+            .filter_level(log::LevelFilter::Trace)
+            .filter_module("mio::poll", log::LevelFilter::Error)
             .init();
     }
 
