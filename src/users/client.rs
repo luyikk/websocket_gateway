@@ -1,6 +1,6 @@
 use crate::time::timestamp;
 use crate::{get_len, IServiceManager, SERVICE_MANAGER};
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{ensure, Result};
 use bytes::BufMut;
 use data_rw::DataOwnedReader;
 use std::fmt::{self, Display, Formatter};
@@ -24,7 +24,7 @@ pub struct Client {
 
 impl Drop for Client {
     fn drop(&mut self) {
-        log::debug! {"ClientPeer:{} drop",self}
+        log::debug! {"Client:{} drop",self}
     }
 }
 
@@ -43,7 +43,7 @@ impl Client {
             peer,
             address,
             is_open_zero: Default::default(),
-            last_recv_time: Default::default(),
+            last_recv_time: AtomicI64::new(timestamp()),
         }
     }
 
@@ -61,6 +61,7 @@ impl Client {
     /// 服务器open ok
     #[inline]
     pub async fn open_service(&self, service_id: u32) -> Result<()> {
+        log::info!("service:{} open peer:{} OK", service_id, self.session_id);
         self.is_open_zero.store(true, Ordering::Release);
         self.send_open(service_id).await
     }
@@ -68,7 +69,7 @@ impl Client {
     /// 服务器通知 关闭某个服务
     #[inline]
     pub async fn close_service(&self, service_id: u32) -> Result<()> {
-        log::info!("service:{} close client:{} ok", service_id, self.session_id);
+        log::info!("service:{} close peer:{} ok", service_id, self.session_id);
         if service_id == 0 {
             self.kick().await
         } else {
@@ -148,10 +149,13 @@ impl Client {
         &self,
         buff: B,
     ) -> Result<()> {
-        self.peer
-            .send_all(buff)
-            .await
-            .map_err(|x| anyhow!("client:{} send data error:{}", self, x))
+        if !self.peer.is_disconnect().await? {
+            let session_id = self.session_id;
+            if let Err(err) = self.peer.send_all(buff).await {
+                log::error!("peer:{} send data error:{}", session_id, err)
+            }
+        }
+        Ok(())
     }
 }
 
@@ -169,11 +173,7 @@ pub async fn input_buff(client: &Arc<Client>, data: Vec<u8>) -> Result<()> {
     client.last_recv_time.store(timestamp(), Ordering::Release);
     if u32::MAX == server_id {
         //给网关发送数据包,默认当PING包无脑回
-        client.send(server_id, &reader[reader.get_offset()..]).await
-    } else if !client.is_open_zero.load(Ordering::Acquire) {
-        client.kick().await?;
-        log::info!("client:{} not open 0 read data Disconnect it", client);
-        Ok(())
+        client.send(server_id, &reader[reader.get_offset()..]).await    
     } else {
         SERVICE_MANAGER
             .send_buffer(client.session_id, server_id, reader)

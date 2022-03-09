@@ -9,7 +9,7 @@ use tokio::net::{TcpStream, ToSocketAddrs};
 
 use crate::static_def::USER_MANAGER;
 use crate::users::{input_buff, Client, IUserManager};
-use crate::{IServiceManager,SERVICE_MANAGER};
+use crate::{IServiceManager, SERVICE_MANAGER};
 
 /// 最大数据表长度限制 512K
 const MAX_BUFF_LEN: usize = 512 * 1024;
@@ -34,7 +34,7 @@ impl Listen {
                 let session_id = client.session_id;
                 let res = Self::data_input(reader, client).await;
                 if let Err(err) = USER_MANAGER.remove_client(session_id).await {
-                    log::error!("remove peer:{} error:{:?}", session_id, err);
+                    log::error!("remove peer:{} error:{}", session_id, err);
                 }
                 res
             })
@@ -79,16 +79,17 @@ impl Listen {
                 //     break;
                 // }
 
-                if let Ok(len) = reader.read_u32_le().await {
-                    len as usize
-                } else {
-                    log::warn!("client:{} disconnect not read data", client);
-                    break;
+                match reader.read_u32_le().await {
+                    Ok(len) => len as usize,
+                    Err(err) => {
+                        log::warn!("peer:{} disconnect,err:{}", client, err);
+                        break;
+                    }
                 }
             };
             //如果没有OPEN 直接掐线
             if !client.is_open_zero.load(Ordering::Acquire) {
-                log::warn!("client:{} not open send data,disconnect!", client);
+                log::warn!("peer:{} not open send data,disconnect!", client);
                 break;
             }
 
@@ -103,7 +104,7 @@ impl Listen {
                 Ok(rev) => {
                     ensure!(
                         len == rev,
-                        "client:{} read buff error len:{}>rev:{}",
+                        "peer:{} read buff error len:{}>rev:{}",
                         client,
                         len,
                         rev

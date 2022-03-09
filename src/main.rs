@@ -1,13 +1,12 @@
 mod config;
 mod services;
 mod static_def;
+mod stdout_log;
 mod time;
 mod timer;
 mod users;
-mod stdout_log;
 
-
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use structopt::*;
 
 use crate::services::IServiceManager;
@@ -30,6 +29,7 @@ async fn main() -> Result<()> {
 #[derive(StructOpt, Debug)]
 #[structopt(name = "tcp gateway service")]
 #[structopt(version=version())]
+#[allow(dead_code)]
 struct NavOpt {
     /// 是否开启控制台日志输出
     #[structopt(short, long)]
@@ -56,7 +56,8 @@ fn version() -> &'static str {
 }
 
 #[cfg(all(feature = "flexi_log", not(feature = "env_log")))]
-static LOGGER_HANDLER: tokio::sync::OnceCell<flexi_logger::LoggerHandle> = tokio::sync::OnceCell::const_new();
+static LOGGER_HANDLER: tokio::sync::OnceCell<flexi_logger::LoggerHandle> =
+    tokio::sync::OnceCell::const_new();
 
 fn install_log() -> Result<()> {
     let opt = NavOpt::from_args();
@@ -71,25 +72,45 @@ fn install_log() -> Result<()> {
         if opt.syslog {
             let logger = Logger::try_with_str("trace, sqlx = error,mio=error")?
                 .log_to_file_and_writer(
-                    FileSpec::default().directory("logs").suppress_timestamp().suffix("log"),
-                    Box::new(stdout_log::StdErrLog::new()),
+                    FileSpec::default()
+                        .directory("logs")
+                        .suppress_timestamp()
+                        .suffix("log"),
+                    Box::new(stdout_log::StdErrLog),
                 )
                 .format(flexi_logger::opt_format)
-                .rotate(Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5), Naming::Numbers, Cleanup::KeepLogFiles(30))
+                .rotate(
+                    Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5),
+                    Naming::Numbers,
+                    Cleanup::KeepLogFiles(30),
+                )
                 .print_message()
                 .set_palette("196;190;2;4;8".into())
                 .write_mode(WriteMode::Async)
                 .start()?;
-            LOGGER_HANDLER.set(logger).map_err(|_| anyhow!("logger set error"))?;
+            LOGGER_HANDLER
+                .set(logger)
+                .map_err(|_| anyhow::anyhow!("logger set error"))?;
         } else {
             let logger = Logger::try_with_str("trace, sqlx = error,mio = error")?
-                .log_to_file(FileSpec::default().directory("logs").suppress_timestamp().suffix("log"))
+                .log_to_file(
+                    FileSpec::default()
+                        .directory("logs")
+                        .suppress_timestamp()
+                        .suffix("log"),
+                )
                 .format(flexi_logger::opt_format)
-                .rotate(Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5), Naming::Numbers, Cleanup::KeepLogFiles(30))
+                .rotate(
+                    Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5),
+                    Naming::Numbers,
+                    Cleanup::KeepLogFiles(30),
+                )
                 .print_message()
                 .write_mode(WriteMode::Async)
                 .start()?;
-            LOGGER_HANDLER.set(logger).map_err(|_| anyhow!("logger set error"))?;
+            LOGGER_HANDLER
+                .set(logger)
+                .map_err(|_| anyhow::anyhow!("logger set error"))?;
         }
     }
     #[cfg(all(feature = "flexi_log", feature = "env_log"))]

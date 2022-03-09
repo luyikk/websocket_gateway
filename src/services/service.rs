@@ -117,6 +117,8 @@ impl Service {
                         {
                             Ok(client) => {
                                 ref_inner.set_client(client).await?;
+                                ref_inner.set_last_ping_time(0);
+                                ref_inner.set_ping_delay_tick(0);
                                 return ref_inner.send_register().await;
                             }
                             Err(err) => {
@@ -212,7 +214,12 @@ impl Service {
                             service_id
                         );
                         if inner.open_ok(session_id).await? {
-                            USER_MANAGER.open_service(service_id, session_id).await?;
+                            if let Err(err) =
+                                USER_MANAGER.open_service(service_id, session_id).await
+                            {
+                                log::error!("client session id:{} open error:{}", session_id, err);
+                                inner.close(session_id).await?;
+                            }
                         } else {
                             log::error!("client session id:{} open fail", session_id);
                         }
@@ -253,9 +260,7 @@ impl Service {
                 }
             } else {
                 //发送数据包给客户端
-                USER_MANAGER
-                    .send_buffer(service_id, session_id, dr.get_offset(), dr.into_inner())
-                    .await?;
+                USER_MANAGER.send_buffer(service_id, session_id, dr).await?;
             }
         }
         Ok(true)

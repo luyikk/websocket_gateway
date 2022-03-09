@@ -34,11 +34,18 @@ pub struct ServiceInner {
     pub disconnect_sender: Option<Left<(), ()>>,
 }
 
+impl Drop for ServiceInner {
+    fn drop(&mut self) {
+        log::info!("service inner:{} is drop", self.service_id)
+    }
+}
+
 impl ServiceInner {
     /// 强制断线
     #[inline]
     async fn disconnect(&mut self) -> Result<()> {
         if let Some(ref client) = self.client {
+            log::warn!("disconnect now to service:{}", self.service_id);
             client.disconnect().await?;
             self.client = None;
             if let Some(ref tx) = self.disconnect_sender {
@@ -64,7 +71,8 @@ impl ServiceInner {
         if self.wait_open_table.insert(session_id) {
             if let Err(er) = self.send_open(session_id, ipaddress).await {
                 self.wait_open_table.remove(&session_id);
-                Err(er)
+                log::error!("open peer:{} error:{}", session_id, er);
+                Ok(())
             } else {
                 Ok(())
             }
@@ -98,7 +106,7 @@ impl ServiceInner {
         let last_ping_time = self.last_ping_time.load(Ordering::Acquire);
         let now = timestamp();
         //30秒超时 单位tick 秒后 7个0
-        if last_ping_time > 0 && now - last_ping_time > 30 * 1000 * 10000 {
+        if last_ping_time > 0 && now - last_ping_time > 60 * 1000 * 10000 {
             log::warn!(
                 "service:{} ping time out,shutdown it,now:{},last_ping_time:{},ping_delay_tick:{}",
                 self.service_id,
@@ -229,7 +237,8 @@ impl ServiceInner {
         if let Some(ref client) = self.client {
             client.send_all(buff).await
         } else {
-            bail!("service:{} not connect", self.service_id)
+            log::error!("service:{} not connect", self.service_id);
+            Ok(())
         }
     }
 
@@ -248,6 +257,8 @@ impl ServiceInner {
 pub trait IServiceInner {
     /// 获取服务器id
     fn get_service_id(&self) -> u32;
+    /// 获取网关id
+    fn get_gateway_id(&self) -> u32;
     /// 设置 ping_delay_tick
     fn set_ping_delay_tick(&self, timestamp: i64);
     /// 获取 ping_delay_tick
@@ -282,10 +293,8 @@ pub trait IServiceInner {
     ) -> Result<()>;
     /// 发送注册包
     async fn send_register(&self) -> Result<()>;
-
     /// 发送BUFF
     async fn send_buffer(&self, session_id: u32, buff: &[u8]) -> Result<()>;
-
     /// 断线
     async fn disconnect(&self) -> Result<()>;
 }
@@ -295,6 +304,10 @@ impl IServiceInner for Actor<ServiceInner> {
     #[inline]
     fn get_service_id(&self) -> u32 {
         unsafe { self.deref_inner().service_id }
+    }
+    #[inline]
+    fn get_gateway_id(&self) -> u32 {
+        unsafe { self.deref_inner().gateway_id }
     }
 
     #[inline]
@@ -355,7 +368,8 @@ impl IServiceInner for Actor<ServiceInner> {
 
     #[inline]
     async fn check_ping(&self) -> Result<bool> {
-        unsafe { self.deref_inner().check_ping().await }
+        self.inner_call(|inner| async move { inner.get_mut().check_ping().await })
+            .await
     }
 
     #[inline]
@@ -384,38 +398,42 @@ impl IServiceInner for Actor<ServiceInner> {
         data: &[u8],
     ) -> Result<()> {
         unsafe {
-            self.deref_inner()
-                .send_buffer_by_typeid(session_id, serial, typeid, data)
-                .await
+            self.inner_call_ref(|inner| async move {
+                inner
+                    .get_mut()
+                    .send_buffer_by_typeid(session_id, serial, typeid, data)
+                    .await
+            })
+            .await
         }
     }
 
     #[inline]
     async fn send_register(&self) -> Result<()> {
-        unsafe {
-            let mut buffer = data_rw::Data::new();
-            buffer.write_fixed(0u32);
-            buffer.write_fixed(0xFFFFFFFFu32);
-            buffer.write_var_integer("gatewayId");
-            buffer.write_var_integer(self.deref_inner().gateway_id);
-            buffer.write_fixed(1u8);
-            let len = get_len!(buffer);
-            (&mut buffer[0..4]).put_u32_le(len);
-            self.deref_inner().send_buff(buffer.into_inner()).await
-        }
+        let mut buffer = data_rw::Data::new();
+        buffer.write_fixed(0u32);
+        buffer.write_fixed(0xFFFFFFFFu32);
+        buffer.write_var_integer("gatewayId");
+        buffer.write_var_integer(self.get_gateway_id());
+        buffer.write_fixed(1u8);
+        let len = get_len!(buffer);
+        (&mut buffer[0..4]).put_u32_le(len);
+
+        self.inner_call(|inner| async move { inner.get().send_buff(buffer.into_inner()).await })
+            .await
     }
 
     #[inline]
     async fn send_buffer(&self, session_id: u32, buff: &[u8]) -> Result<()> {
-        unsafe {
-            let mut buffer = data_rw::Data::new();
-            buffer.write_fixed(0u32);
-            buffer.write_fixed(session_id);
-            buffer.write_buf(buff);
-            let len = get_len!(buffer);
-            (&mut buffer[0..4]).put_u32_le(len);
-            self.deref_inner().send_buff(buffer.into_inner()).await
-        }
+        let mut buffer = data_rw::Data::new();
+        buffer.write_fixed(0u32);
+        buffer.write_fixed(session_id);
+        buffer.write_buf(buff);
+        let len = get_len!(buffer);
+        (&mut buffer[0..4]).put_u32_le(len);
+
+        self.inner_call(|inner| async move { inner.get().send_buff(buffer.into_inner()).await })
+            .await
     }
 
     #[inline]
