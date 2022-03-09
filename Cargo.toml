@@ -14,7 +14,7 @@ env_log=["env_logger"]
 tokio = {version="1",features=["full"]}
 anyhow="1"
 tcpclient = "1.3"
-tcpserver = "1.5"
+websocket-server-async = {path="../websocket-server-async"}
 mimalloc = "0.1"
 ahash ="0.7"
 aqueue = "1"

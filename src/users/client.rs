@@ -8,8 +8,8 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tcpserver::IPeer;
 use tokio::time::sleep;
+use websocket_server_async::IPeer;
 
 use crate::users::Peer;
 
@@ -151,7 +151,7 @@ impl Client {
     ) -> Result<()> {
         if !self.peer.is_disconnect().await? {
             let session_id = self.session_id;
-            if let Err(err) = self.peer.send_all(buff).await {
+            if let Err(err) = self.peer.send_all_ref(&buff).await {
                 log::error!("peer:{} send data error:{}", session_id, err)
             }
         }
@@ -168,12 +168,21 @@ pub async fn input_buff(client: &Arc<Client>, data: Vec<u8>) -> Result<()> {
         client.session_id,
         data.len()
     );
+
     let mut reader = DataOwnedReader::new(data);
+    let len = reader.read_fixed::<u32>()? as usize;
+    ensure!(
+        len == reader.len() - 4,
+        "peer:{} reader len error:{} == {}",
+        client.session_id,
+        len,
+        reader.len() - 4
+    );
+
     let server_id = reader.read_fixed::<u32>()?;
-    client.last_recv_time.store(timestamp(), Ordering::Release);
     if u32::MAX == server_id {
         //给网关发送数据包,默认当PING包无脑回
-        client.send(server_id, &reader[reader.get_offset()..]).await    
+        client.send(server_id, &reader[reader.get_offset()..]).await
     } else {
         SERVICE_MANAGER
             .send_buffer(client.session_id, server_id, reader)
