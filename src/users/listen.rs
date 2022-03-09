@@ -90,7 +90,7 @@ impl Listen {
                 break;
             }
 
-            client.last_recv_time.store(timestamp(), Ordering::Release);
+            //client.last_recv_time.store(timestamp(), Ordering::Release);
 
             if msg.is_binary() {
                 //如果没有OPEN 直接掐线
