@@ -55,7 +55,8 @@ impl Client {
         // 管它有没有 每个服务器都调用下 DropClientPeer 让服务器的 DropClientPeer 自己检查
         SERVICE_MANAGER.disconnect_events(self.session_id).await?;
         // 断线
-        self.peer.disconnect().await
+        let _=self.peer.disconnect().await;
+        Ok(())
     }
 
     /// 服务器open ok

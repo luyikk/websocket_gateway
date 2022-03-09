@@ -4,6 +4,7 @@ mod static_def;
 mod time;
 mod timer;
 mod users;
+mod stdout_log;
 
 use anyhow::Result;
 use structopt::*;
@@ -12,8 +13,6 @@ use crate::services::IServiceManager;
 use crate::static_def::{CONFIG, SERVICE_MANAGER, TIMER_MANAGER};
 use crate::users::Listen;
 
-#[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -26,7 +25,7 @@ async fn main() -> Result<()> {
 }
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "tcp gateway service")]
+#[structopt(name = "websocket gateway service")]
 #[structopt(version=version())]
 #[allow(dead_code)]
 struct NavOpt {
@@ -64,12 +63,61 @@ fn install_log() -> Result<()> {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    env_logger::Builder::new()
-        .filter_level(log::LevelFilter::Trace)
-        .filter_module("mio::poll", log::LevelFilter::Error)
-        .filter_module("tokio_tungstenite", log::LevelFilter::Error)
-        .filter_module("tungstenite", log::LevelFilter::Error)
-        .init();
+    #[cfg(all(feature = "flexi_log", not(feature = "env_log")))]
+    {
+        use flexi_logger::{Age, Cleanup, Criterion, FileSpec, Logger, Naming, WriteMode};
+
+        if opt.syslog {
+            let logger = Logger::try_with_str("trace, sqlx = error,mio=error")?
+                .log_to_file_and_writer(
+                    FileSpec::default()
+                        .directory("logs")
+                        .suppress_timestamp()
+                        .suffix("log"),
+                    Box::new(stdout_log::StdErrLog),
+                )
+                .format(flexi_logger::opt_format)
+                .rotate(
+                    Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5),
+                    Naming::Numbers,
+                    Cleanup::KeepLogFiles(30),
+                )
+                .print_message()
+                .set_palette("196;190;2;4;8".into())
+                .write_mode(WriteMode::Async)
+                .start()?;
+            LOGGER_HANDLER
+                .set(logger)
+                .map_err(|_| anyhow::anyhow!("logger set error"))?;
+        } else {
+            let logger = Logger::try_with_str("trace, sqlx = error,mio = error")?
+                .log_to_file(
+                    FileSpec::default()
+                        .directory("logs")
+                        .suppress_timestamp()
+                        .suffix("log"),
+                )
+                .format(flexi_logger::opt_format)
+                .rotate(
+                    Criterion::AgeOrSize(Age::Day, 1024 * 1024 * 5),
+                    Naming::Numbers,
+                    Cleanup::KeepLogFiles(30),
+                )
+                .print_message()
+                .write_mode(WriteMode::Async)
+                .start()?;
+            LOGGER_HANDLER
+                .set(logger)
+                .map_err(|_| anyhow::anyhow!("logger set error"))?;
+        }
+    }
+    #[cfg(all(feature = "flexi_log", feature = "env_log"))]
+    {
+        env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Trace)
+            .filter_module("mio::poll", log::LevelFilter::Error)
+            .init();
+    }
 
     Ok(())
 }

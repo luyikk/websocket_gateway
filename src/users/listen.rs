@@ -14,8 +14,8 @@ use crate::{IServiceManager, CONFIG, SERVICE_MANAGER};
 
 /// 最大数据表长度限制 1M
 const MAX_BUFF_LEN: usize = 1024 * 1024;
-/// 最大帧长度 256K
-const MAX_FRAME_LEN: usize = 256 * 1024;
+/// 最大帧长度 512K
+const MAX_FRAME_LEN: usize = 512 * 1024;
 
 pub type Peer = Arc<Actor<WSPeer>>;
 
@@ -28,7 +28,7 @@ impl Listen {
     pub async fn new<ToAddress: ToSocketAddrs>(address: ToAddress) -> Result<Self> {
         let server = Builder::new(address)
             .set_config(WebSocketConfig {
-                max_send_queue: None,
+                max_send_queue: Some(10),
                 max_message_size: Some(MAX_BUFF_LEN),
                 max_frame_size: Some(MAX_FRAME_LEN),
                 accept_unmasked_frames: false,
@@ -86,7 +86,7 @@ impl Listen {
                 }
             };
 
-            if client.peer.is_disconnect().await{
+            if client.peer.is_disconnect().await?{
                 break;
             }
 
