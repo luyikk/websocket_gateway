@@ -68,7 +68,7 @@ fn install_log() -> Result<()> {
         use flexi_logger::{Age, Cleanup, Criterion, FileSpec, Logger, Naming, WriteMode};
 
         if opt.syslog {
-            let logger = Logger::try_with_str("trace, sqlx = error,mio=error")?
+            let logger = Logger::try_with_str("trace, sqlx = error,mio=error,tokio_tungstenite=error,tungstenite=error")?
                 .log_to_file_and_writer(
                     FileSpec::default()
                         .directory("logs")
@@ -116,6 +116,8 @@ fn install_log() -> Result<()> {
         env_logger::Builder::new()
             .filter_level(log::LevelFilter::Trace)
             .filter_module("mio::poll", log::LevelFilter::Error)
+            .filter_module("tokio_tungstenite", log::LevelFilter::Error)
+            .filter_module("tungstenite", log::LevelFilter::Error)
             .init();
     }
 
