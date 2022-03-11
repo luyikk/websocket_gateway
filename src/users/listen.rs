@@ -74,7 +74,7 @@ impl Listen {
             .await
             {
                 Ok(Some(Ok(msg))) => msg,
-                Ok(Some(Err(err)))=>bail!("read msg error:{:?}",err),
+                Ok(Some(Err(err))) => bail!("read msg error:{:?}", err),
                 Ok(None) => bail!("client:{} not read message", client),
                 Err(_) => {
                     bail!(
@@ -85,7 +85,7 @@ impl Listen {
                 }
             };
 
-            if client.peer.is_disconnect().await?{
+            if client.peer.is_disconnect().await? {
                 break;
             }
 
