@@ -440,7 +440,7 @@ impl IServiceInner for Actor<ServiceInner> {
     #[inline]
     async fn disconnect(&self) -> Result<()> {
         self.inner_call(|inner| async move {
-            inner.get_mut().disconnect();
+            inner.get_mut().disconnect().await;
             Ok(())
         })
         .await

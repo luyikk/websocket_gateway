@@ -1,6 +1,6 @@
 {
   "gatewayId": 1,
-  "listenPort": 20000,
+  "listenPort": 20001,
   "clientTimeoutSeconds": 30,
   "services": [
     {
