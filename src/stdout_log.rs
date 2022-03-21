@@ -19,6 +19,7 @@ fn get_file_name(path: Option<&str>) -> anyhow::Result<&str> {
 }
 
 impl LogWriter for StdErrLog {
+    #[inline]
     fn write(&self, now: &mut DeferredNow, record: &Record) -> std::io::Result<()> {
         let level = record.level();
         write!(
