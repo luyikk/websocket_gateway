@@ -2,15 +2,13 @@ use anyhow::{bail, Result};
 use aqueue::Actor;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::net::{TcpStream, ToSocketAddrs};
-use tokio::time::timeout;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use websocket_server_async::*;
 
-use crate::static_def::USER_MANAGER;
+use crate::static_def::{USER_MANAGER,CONFIG};
 use crate::users::{input_buff, Client, IUserManager};
-use crate::{IServiceManager, CONFIG, SERVICE_MANAGER};
+use crate::{IServiceManager, SERVICE_MANAGER};
 
 /// 最大数据表长度限制 1M
 const MAX_BUFF_LEN: usize = 1024 * 1024;
@@ -33,6 +31,7 @@ impl Listen {
                 max_frame_size: Some(MAX_FRAME_LEN),
                 accept_unmasked_frames: false,
             })
+            .set_load_timeout(CONFIG.websocket_load_timeout_seconds.map_or(5,|x|x))
             .set_connect_event(|addr| {
                 log::info!("ipaddress:{} connect", addr);
                 true
@@ -71,17 +70,22 @@ impl Listen {
 
         loop {
             let msg = tokio::select! {
-                msg = timeout(Duration::from_secs(CONFIG.client_timeout_seconds as u64),reader.next())=> match msg{
-                    Ok(Some(Ok(msg))) => msg,
-                    Ok(Some(Err(err))) => bail!("read msg error:{:?}", err),
-                    Ok(None) => bail!("client:{} not read message", client),
-                    Err(_) => {
-                        bail!(
-                            "client:{} {}secs not read timeout",
-                            client,
-                            CONFIG.client_timeout_seconds
-                        )
-                    }
+                // msg = tokio::time::timeout(std::time::Duration::from_secs((crate::CONFIG.client_timeout_seconds+1000) as u64),reader.next())=> match msg{
+                //     Ok(Some(Ok(msg))) => msg,
+                //     Ok(Some(Err(err))) => bail!("read msg error:{:?}", err),
+                //     Ok(None) => bail!("client:{} not read message", client),
+                //     Err(_) => {
+                //         bail!(
+                //             "client:{} {}secs not read timeout",
+                //             client,
+                //             CONFIG.client_timeout_seconds
+                //         )
+                //     }
+                // },
+                msg = reader.next()=> match msg{
+                    Some(Ok(msg)) => msg,
+                    Some(Err(err)) => bail!("read msg error:{:?}", err),
+                    None => bail!("client:{} not read message", client),
                 },
                 _ = disconnect_receiver.recv()=>{
                     break
@@ -92,7 +96,7 @@ impl Listen {
                 break;
             }
 
-            //client.last_recv_time.store(timestamp(), Ordering::Release);
+            client.last_recv_time.store(crate::time::timestamp(), Ordering::Release);
 
             if msg.is_binary() {
                 //如果没有OPEN 直接掐线

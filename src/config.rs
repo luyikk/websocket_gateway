@@ -9,6 +9,8 @@ pub struct Config {
     pub listen_port: i32,
     #[serde(rename = "clientTimeoutSeconds")]
     pub client_timeout_seconds: i32,
+    #[serde(default,rename = "websocketLoadTimeoutSeconds")]
+    pub websocket_load_timeout_seconds:Option<u64>,
     pub services: Vec<ServiceConfig>,
 }
 
