@@ -7,6 +7,7 @@ use aqueue::Actor;
 use data_rw::DataOwnedReader;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::time::timestamp;
 pub use client::*;
@@ -32,8 +33,8 @@ impl UserManager {
     }
     ///制造一个client
     #[inline]
-    fn make_client(&mut self, peer: Peer) -> Result<Arc<Client>> {
-        let client = Arc::new(Client::new(peer, self.make_session_id()));
+    fn make_client(&mut self, peer: Peer,disconnect_sender:UnboundedSender<()>) -> Result<Arc<Client>> {
+        let client = Arc::new(Client::new(peer, self.make_session_id(),disconnect_sender));
         ensure!(
             self.users
                 .insert(client.session_id, client.clone())
@@ -179,7 +180,7 @@ pub trait IUserManager {
     /// 制造一个 session_id
     fn make_session_id(&self) -> u32;
     /// 制造一个 client
-    async fn make_client(&self, peer: Peer) -> Result<Arc<Client>>;
+    async fn make_client(&self, peer: Peer,disconnect_sender:UnboundedSender<()>) -> Result<Arc<Client>>;
     /// 删除一个client
     async fn remove_client(&self, session_id: u32) -> Result<()>;
     /// send open service 通知
@@ -206,8 +207,8 @@ impl IUserManager for Actor<UserManager> {
         unsafe { self.deref_inner().make_session_id() }
     }
     #[inline]
-    async fn make_client(&self, peer: Peer) -> Result<Arc<Client>> {
-        self.inner_call(|inner| async move { inner.get_mut().make_client(peer) })
+    async fn make_client(&self, peer: Peer,disconnect_sender:UnboundedSender<()>) -> Result<Arc<Client>> {
+        self.inner_call(|inner| async move { inner.get_mut().make_client(peer,disconnect_sender) })
             .await
     }
     #[inline]

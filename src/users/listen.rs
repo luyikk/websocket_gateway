@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::net::{TcpStream, ToSocketAddrs};
 use tokio::time::timeout;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use websocket_server_async::*;
 
 use crate::static_def::USER_MANAGER;
@@ -37,9 +38,10 @@ impl Listen {
                 true
             })
             .set_input_event(|reader, peer, _| async move {
-                let client = USER_MANAGER.make_client(peer).await?;
+                let (disconnect_sender, disconnect_receiver)=unbounded_channel::<()>();
+                let client = USER_MANAGER.make_client(peer,disconnect_sender).await?;
                 let session_id = client.session_id;
-                let res = Self::data_input(reader, client).await;
+                let res = Self::data_input(reader, client,disconnect_receiver).await;
                 if let Err(err) = USER_MANAGER.remove_client(session_id).await {
                     log::error!("remove peer:{} error:{}", session_id, err);
                 }
@@ -60,6 +62,7 @@ impl Listen {
     async fn data_input(
         mut reader: SplitStream<WebSocketStream<TcpStream>>,
         client: Arc<Client>,
+        mut disconnect_receiver:UnboundedReceiver<()>
     ) -> Result<()> {
         log::debug!("create peer:{}", client);
         SERVICE_MANAGER
@@ -67,21 +70,21 @@ impl Listen {
             .await?;
 
         loop {
-            let msg = match timeout(
-                Duration::from_secs(CONFIG.client_timeout_seconds as u64),
-                reader.next(),
-            )
-            .await
-            {
-                Ok(Some(Ok(msg))) => msg,
-                Ok(Some(Err(err))) => bail!("read msg error:{:?}", err),
-                Ok(None) => bail!("client:{} not read message", client),
-                Err(_) => {
-                    bail!(
-                        "client:{} {}secs not read timeout",
-                        client,
-                        CONFIG.client_timeout_seconds
-                    )
+            let msg = tokio::select! {
+                msg = timeout(Duration::from_secs(CONFIG.client_timeout_seconds as u64),reader.next())=> match msg{
+                    Ok(Some(Ok(msg))) => msg,
+                    Ok(Some(Err(err))) => bail!("read msg error:{:?}", err),
+                    Ok(None) => bail!("client:{} not read message", client),
+                    Err(_) => {
+                        bail!(
+                            "client:{} {}secs not read timeout",
+                            client,
+                            CONFIG.client_timeout_seconds
+                        )
+                    }
+                },
+                _ = disconnect_receiver.recv()=>{
+                    break
                 }
             };
 

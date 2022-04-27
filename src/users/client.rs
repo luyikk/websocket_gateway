@@ -8,6 +8,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio::time::sleep;
 use websocket_server_async::IPeer;
 
@@ -20,6 +21,7 @@ pub struct Client {
     pub address: String,
     pub is_open_zero: AtomicBool,
     pub last_recv_time: AtomicI64,
+    disconnect_sender:UnboundedSender<()>,
 }
 
 impl Drop for Client {
@@ -36,7 +38,7 @@ impl Display for Client {
 
 impl Client {
     #[inline]
-    pub fn new(peer: Peer, session_id: u32) -> Self {
+    pub fn new(peer: Peer, session_id: u32,disconnect_sender:UnboundedSender<()>) -> Self {
         let address = peer.addr().to_string();
         Self {
             session_id,
@@ -44,6 +46,7 @@ impl Client {
             address,
             is_open_zero: Default::default(),
             last_recv_time: AtomicI64::new(timestamp()),
+            disconnect_sender
         }
     }
 
@@ -56,6 +59,9 @@ impl Client {
         SERVICE_MANAGER.disconnect_events(self.session_id).await?;
         // 断线
         let _ = self.peer.disconnect().await;
+        if !self.disconnect_sender.is_closed() {
+            self.disconnect_sender.send(())?;
+        }
         Ok(())
     }
 

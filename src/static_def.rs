@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::services::ServiceManager;
 use crate::timer::{PingCheckTimer, Timer, TimerManager};
 use crate::users::UserManager;
+//use crate::timer::CheckTimeOut;
 use aqueue::Actor;
 use std::env::current_dir;
 use std::path::Path;
@@ -52,7 +53,8 @@ lazy_static::lazy_static! {
     /// TIME 管理器
     pub static ref TIMER_MANAGER:TimerManager={
         let ts= vec![
-            Box::new(PingCheckTimer) as Box<dyn Timer>
+            Box::new(PingCheckTimer) as Box<dyn Timer>,
+            //Box::new(CheckTimeOut) as Box<dyn Timer>
         ];
         TimerManager::new(ts)
     };
